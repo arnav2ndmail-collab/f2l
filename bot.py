@@ -4,7 +4,13 @@ Stores only the file_id (a Telegram pointer). Zero bytes transferred.
 Links work by re-sending via file_id, which is instant regardless of file size.
 """
 
-import os, hashlib, time, logging, re
+import os
+import re
+import time
+import hashlib
+import logging
+import asyncio
+
 from collections import defaultdict
 
 from telegram import (
@@ -14,6 +20,7 @@ from telegram import (
     BotCommand,
     BotCommandScopeDefault
 )
+
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -22,6 +29,7 @@ from telegram.ext import (
     ContextTypes,
     filters
 )
+
 from telegram.constants import ParseMode
 
 import database as db
@@ -31,6 +39,7 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(message)s",
     level=logging.INFO
 )
+
 log = logging.getLogger(__name__)
 
 # ── Rate limiter ─────────────────────────────────────────────────────────────
@@ -39,25 +48,32 @@ _rate: dict[int, list] = defaultdict(list)
 
 def throttled(uid):
     now = time.time()
+
     calls = [t for t in _rate[uid] if now - t < 60]
+
     _rate[uid] = calls
 
     if len(calls) >= config.RATE_LIMIT:
         return True
 
     _rate[uid].append(now)
+
     return False
 
 
 def sid():
-    return hashlib.md5(str(time.time_ns()).encode()).hexdigest()[:8]
+    return hashlib.md5(
+        str(time.time_ns()).encode()
+    ).hexdigest()[:8]
 
 
 def fmt(n):
     for u in ("B", "KB", "MB", "GB"):
         if n < 1024:
             return f"{n:.1f} {u}"
+
         n /= 1024
+
     return f"{n:.1f} TB"
 
 
@@ -70,7 +86,11 @@ def escape_md(text):
 
 
 def kb(short_id):
-    link = f"https://t.me/{config.BOT_USERNAME}?start=file_{short_id}"
+    link = (
+        f"https://t.me/"
+        f"{config.BOT_USERNAME}"
+        f"?start=file_{short_id}"
+    )
 
     return InlineKeyboardMarkup([
         [
@@ -84,11 +104,13 @@ def kb(short_id):
                 "📋 Info",
                 callback_data=f"info:{short_id}"
             ),
+
             InlineKeyboardButton(
                 "🗑 Delete",
                 callback_data=f"del:{short_id}"
             )
         ],
+
         [
             InlineKeyboardButton(
                 "📂 My Files",
@@ -110,20 +132,26 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     )
 
     if ctx.args and ctx.args[0].startswith("file_"):
+
         rec = db.get_file(ctx.args[0][5:])
 
         if rec:
             await ctx.bot.send_document(
                 chat_id=update.effective_chat.id,
                 document=rec["file_id"],
+
                 caption=(
                     f"📄 *{escape_md(rec['file_name'])}*"
-                    f"  •  `{fmt(rec['file_size'])}`"
+                    f" • `{fmt(rec['file_size'])}`"
                 ),
+
                 parse_mode=ParseMode.MARKDOWN_V2,
             )
+
         else:
-            await update.message.reply_text("❌ File not found.")
+            await update.message.reply_text(
+                "❌ File not found."
+            )
 
         return
 
@@ -132,13 +160,16 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "Send me any file → get an instant shareable link.\n"
         "No size limit\\. No upload\\. Just a link\\.\n\n"
         "/myfiles /stats /search /help",
+
         parse_mode=ParseMode.MARKDOWN_V2,
+
         reply_markup=InlineKeyboardMarkup([
             [
                 InlineKeyboardButton(
                     "📂 Files",
                     callback_data="myfiles:0"
                 ),
+
                 InlineKeyboardButton(
                     "📊 Stats",
                     callback_data="stats"
@@ -148,7 +179,7 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     )
 
 
-# ── Core: handle any file ────────────────────────────────────────────────────
+# ── Core: handle files ───────────────────────────────────────────────────────
 
 ANY_FILE = (
     filters.Document.ALL
@@ -162,6 +193,7 @@ ANY_FILE = (
 
 
 async def handle_file(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+
     user = update.effective_user
 
     db.ensure_user(
@@ -171,9 +203,11 @@ async def handle_file(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     )
 
     if throttled(user.id):
+
         await update.message.reply_text(
             f"⏳ Max {config.RATE_LIMIT}/min — slow down."
         )
+
         return
 
     msg = update.message
@@ -193,9 +227,15 @@ async def handle_file(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     short = sid()
 
-    file_name = getattr(media, "file_name", None) or f"file_{short}"
+    file_name = (
+        getattr(media, "file_name", None)
+        or f"file_{short}"
+    )
+
     file_size = getattr(media, "file_size", 0) or 0
+
     mime = getattr(media, "mime_type", None)
+
     file_id = media.file_id
 
     db.save_file(
@@ -208,15 +248,22 @@ async def handle_file(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         msg_id=msg.message_id,
     )
 
-    link = f"https://t.me/{config.BOT_USERNAME}?start=file_{short}"
+    link = (
+        f"https://t.me/"
+        f"{config.BOT_USERNAME}"
+        f"?start=file_{short}"
+    )
 
     await msg.reply_text(
         f"✅ *Done\\!*\n\n"
         f"📄 `{escape_md(file_name)}`\n"
         f"📦 `{fmt(file_size)}`\n\n"
         f"🔗 *Link:*\n`{link}`",
+
         parse_mode=ParseMode.MARKDOWN_V2,
+
         reply_markup=kb(short),
+
         disable_web_page_preview=True,
     )
 
@@ -227,6 +274,7 @@ PAGE = 5
 
 
 async def myfiles(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+
     page = int(ctx.args[0]) if ctx.args else 0
 
     await _filelist(
@@ -238,6 +286,7 @@ async def myfiles(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 
 async def _filelist(update, ctx, uid, page):
+
     files = db.get_user_files(
         uid,
         limit=PAGE,
@@ -245,16 +294,21 @@ async def _filelist(update, ctx, uid, page):
     )
 
     total = db.count_user_files(uid)
+
     pages = max(1, -(-total // PAGE))
 
     if not files:
+
         text = "📂 No files yet — send me something\\!"
+
     else:
+
         lines = [
             f"📂 *Your Files* \\(page {page+1}/{pages}\\)\n"
         ]
 
         for f in files:
+
             link = (
                 f"https://t.me/"
                 f"{config.BOT_USERNAME}"
@@ -274,6 +328,7 @@ async def _filelist(update, ctx, uid, page):
     nav = []
 
     if page > 0:
+
         nav.append(
             InlineKeyboardButton(
                 "⬅️",
@@ -282,6 +337,7 @@ async def _filelist(update, ctx, uid, page):
         )
 
     if (page + 1) * PAGE < total:
+
         nav.append(
             InlineKeyboardButton(
                 "➡️",
@@ -311,8 +367,11 @@ async def _filelist(update, ctx, uid, page):
 
     await fn(
         text,
+
         parse_mode=ParseMode.MARKDOWN_V2,
+
         reply_markup=kb2,
+
         disable_web_page_preview=True
     )
 
@@ -320,6 +379,7 @@ async def _filelist(update, ctx, uid, page):
 # ── /stats ───────────────────────────────────────────────────────────────────
 
 async def stats(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+
     s = db.get_user_stats(update.effective_user.id)
 
     msg = update.message or update.callback_query.message
@@ -329,6 +389,7 @@ async def stats(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         f"📁 Files: *{s['count']}*\n"
         f"💾 Total: *{fmt(s['total_size'])}*\n"
         f"🕐 Last: `{s['last_upload'] or 'never'}`",
+
         parse_mode=ParseMode.MARKDOWN,
     )
 
@@ -336,11 +397,14 @@ async def stats(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 # ── /search ──────────────────────────────────────────────────────────────────
 
 async def search(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+
     if not ctx.args:
+
         await update.message.reply_text(
             "Usage: `/search <name>`",
             parse_mode=ParseMode.MARKDOWN
         )
+
         return
 
     q = " ".join(ctx.args)
@@ -351,15 +415,18 @@ async def search(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     )
 
     if not results:
+
         await update.message.reply_text(
             f"🔍 Nothing found for *{q}*.",
             parse_mode=ParseMode.MARKDOWN
         )
+
         return
 
     lines = [f"🔍 *Results for* `{escape_md(q)}`\n"]
 
     for f in results[:10]:
+
         link = (
             f"https://t.me/"
             f"{config.BOT_USERNAME}"
@@ -373,7 +440,9 @@ async def search(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(
         "\n".join(lines),
+
         parse_mode=ParseMode.MARKDOWN_V2,
+
         disable_web_page_preview=True
     )
 
@@ -381,21 +450,32 @@ async def search(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 # ── /delete ──────────────────────────────────────────────────────────────────
 
 async def delete(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+
     if not ctx.args:
+
         await update.message.reply_text(
             "Usage: `/delete <id>`",
             parse_mode=ParseMode.MARKDOWN
         )
+
         return
 
     rec = db.get_file(ctx.args[0])
 
     if not rec:
-        await update.message.reply_text("❌ Not found.")
+
+        await update.message.reply_text(
+            "❌ Not found."
+        )
+
         return
 
     if rec["user_id"] != update.effective_user.id:
-        await update.message.reply_text("⛔ Not yours.")
+
+        await update.message.reply_text(
+            "⛔ Not yours."
+        )
+
         return
 
     db.delete_file(ctx.args[0])
@@ -409,6 +489,7 @@ async def delete(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 # ── /help ────────────────────────────────────────────────────────────────────
 
 async def help_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+
     await update.message.reply_text(
         "📖 *Help*\n\n"
         "Send any file → instant link\\.\n\n"
@@ -417,6 +498,7 @@ async def help_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "/search  — find by name\n"
         "/delete  — delete by ID\n"
         "/help    — this message",
+
         parse_mode=ParseMode.MARKDOWN_V2,
     )
 
@@ -424,13 +506,17 @@ async def help_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 # ── Callbacks ────────────────────────────────────────────────────────────────
 
 async def on_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+
     q = update.callback_query
+
     await q.answer()
 
     data = q.data
+
     uid = q.from_user.id
 
     if data.startswith("myfiles:"):
+
         await _filelist(
             update,
             ctx,
@@ -439,12 +525,15 @@ async def on_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
 
     elif data == "stats":
+
         await stats(update, ctx)
 
     elif data.startswith("info:"):
+
         rec = db.get_file(data.split(":")[1])
 
         if rec:
+
             link = (
                 f"https://t.me/"
                 f"{config.BOT_USERNAME}"
@@ -459,27 +548,36 @@ async def on_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 f"🗂 `{rec['mime_type'] or 'unknown'}`\n"
                 f"📅 `{rec['created_at']}`\n\n"
                 f"🔗 `{link}`",
+
                 parse_mode=ParseMode.MARKDOWN_V2,
+
                 disable_web_page_preview=True,
             )
 
     elif data.startswith("del:"):
+
         sid_val = data.split(":")[1]
+
         rec = db.get_file(sid_val)
 
         if rec and rec["user_id"] == uid:
+
             db.delete_file(sid_val)
+
             await q.message.edit_text("🗑 Deleted.")
+
         else:
+
             await q.answer(
                 "Not found or not yours.",
                 show_alert=True
             )
 
 
-# ── Boot ─────────────────────────────────────────────────────────────────────
+# ── Startup ──────────────────────────────────────────────────────────────────
 
 async def post_init(app):
+
     await app.bot.set_my_commands([
         BotCommand("start", "Welcome / retrieve a file"),
         BotCommand("myfiles", "Browse your files"),
@@ -490,7 +588,8 @@ async def post_init(app):
     ], scope=BotCommandScopeDefault())
 
 
-def main():
+async def run():
+
     application = (
         Application.builder()
         .token(config.BOT_TOKEN)
@@ -506,7 +605,10 @@ def main():
         ("delete", delete),
         ("help", help_cmd)
     ]:
-        application.add_handler(CommandHandler(cmd, fn))
+
+        application.add_handler(
+            CommandHandler(cmd, fn)
+        )
 
     application.add_handler(
         CallbackQueryHandler(on_cb)
@@ -518,9 +620,20 @@ def main():
 
     log.info("Bot running — instant file_id mode")
 
-    application.run_polling(
+    await application.initialize()
+
+    await application.start()
+
+    await application.updater.start_polling(
         allowed_updates=Update.ALL_TYPES
     )
+
+    while True:
+        await asyncio.sleep(3600)
+
+
+def main():
+    asyncio.run(run())
 
 
 if __name__ == "__main__":
