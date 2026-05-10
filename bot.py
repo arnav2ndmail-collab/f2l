@@ -11,6 +11,9 @@ import hashlib
 import logging
 import asyncio
 
+from threading import Thread
+from flask import Flask
+
 from collections import defaultdict
 
 from telegram import (
@@ -42,9 +45,26 @@ logging.basicConfig(
 
 log = logging.getLogger(__name__)
 
+# ── Tiny web server for Render ───────────────────────────────────────────────
+
+app = Flask(__name__)
+
+@app.route("/")
+def home():
+    return "Bot running"
+
+
+def run_web():
+    app.run(
+        host="0.0.0.0",
+        port=int(os.environ.get("PORT", 10000))
+    )
+
+
 # ── Rate limiter ─────────────────────────────────────────────────────────────
 
 _rate: dict[int, list] = defaultdict(list)
+
 
 def throttled(uid):
     now = time.time()
@@ -86,6 +106,7 @@ def escape_md(text):
 
 
 def kb(short_id):
+
     link = (
         f"https://t.me/"
         f"{config.BOT_USERNAME}"
@@ -99,6 +120,7 @@ def kb(short_id):
                 url=f"https://t.me/share/url?url={link}"
             )
         ],
+
         [
             InlineKeyboardButton(
                 "📋 Info",
@@ -123,6 +145,7 @@ def kb(short_id):
 # ── /start ───────────────────────────────────────────────────────────────────
 
 async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+
     user = update.effective_user
 
     db.ensure_user(
@@ -136,6 +159,7 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         rec = db.get_file(ctx.args[0][5:])
 
         if rec:
+
             await ctx.bot.send_document(
                 chat_id=update.effective_chat.id,
                 document=rec["file_id"],
@@ -149,6 +173,7 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             )
 
         else:
+
             await update.message.reply_text(
                 "❌ File not found."
             )
@@ -156,10 +181,12 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
 
     await update.message.reply_text(
-        f"👋 *Hey {escape_md(user.first_name)}!*\n\n"
-        "Send me any file → get an instant shareable link.\n"
-        "No size limit\\. No upload\\. Just a link\\.\n\n"
-        "/myfiles /stats /search /help",
+        (
+            f"👋 *Hey {escape_md(user.first_name)}\\!*\n\n"
+            "Send me any file → get an instant shareable link\\.\n"
+            "No size limit\\. No upload\\. Just a link\\.\n\n"
+            "/myfiles /stats /search /help"
+        ),
 
         parse_mode=ParseMode.MARKDOWN_V2,
 
@@ -255,10 +282,12 @@ async def handle_file(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     )
 
     await msg.reply_text(
-        f"✅ *Done\\!*\n\n"
-        f"📄 `{escape_md(file_name)}`\n"
-        f"📦 `{fmt(file_size)}`\n\n"
-        f"🔗 *Link:*\n`{link}`",
+        (
+            f"✅ *Done\\!*\n\n"
+            f"📄 `{escape_md(file_name)}`\n"
+            f"📦 `{fmt(file_size)}`\n\n"
+            f"🔗 *Link:*\n`{link}`"
+        ),
 
         parse_mode=ParseMode.MARKDOWN_V2,
 
@@ -385,10 +414,12 @@ async def stats(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     msg = update.message or update.callback_query.message
 
     await msg.reply_text(
-        f"📊 *Stats*\n\n"
-        f"📁 Files: *{s['count']}*\n"
-        f"💾 Total: *{fmt(s['total_size'])}*\n"
-        f"🕐 Last: `{s['last_upload'] or 'never'}`",
+        (
+            f"📊 *Stats*\n\n"
+            f"📁 Files: *{s['count']}*\n"
+            f"💾 Total: *{fmt(s['total_size'])}*\n"
+            f"🕐 Last: `{s['last_upload'] or 'never'}`"
+        ),
 
         parse_mode=ParseMode.MARKDOWN,
     )
@@ -491,13 +522,15 @@ async def delete(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 async def help_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(
-        "📖 *Help*\n\n"
-        "Send any file → instant link\\.\n\n"
-        "/myfiles — browse uploads\n"
-        "/stats   — usage stats\n"
-        "/search  — find by name\n"
-        "/delete  — delete by ID\n"
-        "/help    — this message",
+        (
+            "📖 *Help*\n\n"
+            "Send any file → instant link\\.\n\n"
+            "/myfiles — browse uploads\n"
+            "/stats   — usage stats\n"
+            "/search  — find by name\n"
+            "/delete  — delete by ID\n"
+            "/help    — this message"
+        ),
 
         parse_mode=ParseMode.MARKDOWN_V2,
     )
@@ -541,13 +574,15 @@ async def on_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             )
 
             await q.message.reply_text(
-                f"📋 *Info*\n\n"
-                f"🆔 `{rec['short_id']}`\n"
-                f"📄 `{escape_md(rec['file_name'])}`\n"
-                f"📦 `{fmt(rec['file_size'])}`\n"
-                f"🗂 `{rec['mime_type'] or 'unknown'}`\n"
-                f"📅 `{rec['created_at']}`\n\n"
-                f"🔗 `{link}`",
+                (
+                    f"📋 *Info*\n\n"
+                    f"🆔 `{rec['short_id']}`\n"
+                    f"📄 `{escape_md(rec['file_name'])}`\n"
+                    f"📦 `{fmt(rec['file_size'])}`\n"
+                    f"🗂 `{rec['mime_type'] or 'unknown'}`\n"
+                    f"📅 `{rec['created_at']}`\n\n"
+                    f"🔗 `{link}`"
+                ),
 
                 parse_mode=ParseMode.MARKDOWN_V2,
 
@@ -633,6 +668,9 @@ async def run():
 
 
 def main():
+
+    Thread(target=run_web).start()
+
     asyncio.run(run())
 
 
